@@ -272,7 +272,7 @@
                 </button>
                 <button onclick="confirmOutletMode('VF')" class="flex flex-col items-center justify-center p-4 bg-rose-50 border-2 border-rose-200 rounded-2xl hover:bg-purple-600 hover:text-white hover:border-purple-600 transition-all group active:scale-95 shadow-sm">
                     <span class="text-2xl font-black text-purple-600 group-hover:text-white mb-1">VF</span>
-                    <span class="text-[11px] font-bold text-gray-600 group-hover:text-white/90">Full Barcode</span>
+                    <span class="text-[11px] font-bold text-gray-600 group-hover:text-white/90">15 Digit Terakhir</span>
                 </button>
             </div>
 
@@ -351,8 +351,48 @@
 
         // ================= INISIALISASI & RENDERING =================
         window.onload = () => {
+            if (!history.state) {
+                history.replaceState({ view: 'sales' }, '', '#sales');
+            }
             fetchInitialData();
         };
+
+        // Handle Navigasi Back Browser / HP (Popstate)
+        window.addEventListener('popstate', async (event) => {
+            // 1. Cek jika Modal Mode (SA/VF) sedang terbuka
+            const modalMode = document.getElementById('modalMode');
+            if (modalMode && !modalMode.classList.contains('hidden')) {
+                closeOutletModal(true);
+                return;
+            }
+
+            const targetView = (event.state && event.state.view) ? event.state.view : 'sales';
+
+            // 2. Jika meninggalkan scanner ke halaman lain
+            if (currentView === 'scanner' && targetView !== 'scanner') {
+                if (scannedData && scannedData.length > 0) {
+                    const confirmBack = confirm("Ada data yang belum di-submit. Yakin ingin kembali? Data scan akan hilang.");
+                    if (!confirmBack) {
+                        history.pushState({ view: 'scanner' }, '', '#scanner');
+                        return;
+                    }
+                }
+                await stopScanner();
+                selectedOutlet = null;
+            }
+
+            // 3. Jika kembali dari outlets ke sales
+            if (currentView === 'outlets' && targetView === 'sales') {
+                localStorage.removeItem('savedSalesId');
+                selectedSales = null;
+                dbHistoryData = [];
+                document.getElementById('searchSales').value = '';
+                renderSalesList(dataMaster);
+            }
+
+            // Pindah tampilan tanpa pushState ulang
+            switchView(targetView, false);
+        });
 
         async function fetchInitialData() {
             const overlay = document.getElementById('loadingOverlay');
@@ -423,6 +463,9 @@
                             scannedBarcodesDB.add(cleanBarcode);
                             if (cleanBarcode.length > 11) {
                                 scannedBarcodesDB.add(cleanBarcode.slice(-11));
+                            }
+                            if (cleanBarcode.length > 15) {
+                                scannedBarcodesDB.add(cleanBarcode.slice(-15));
                             }
                         }
                     });
@@ -583,13 +626,21 @@
             modal.classList.remove('hidden');
             modal.classList.add('flex');
             lucide.createIcons();
+            if (!history.state || history.state.modal !== 'mode') {
+                history.pushState({ modal: 'mode', view: currentView }, '', '#modal');
+            }
         }
 
-        function closeOutletModal() {
+        function closeOutletModal(fromPopState = false) {
             pendingOutlet = null;
             const modal = document.getElementById('modalMode');
-            modal.classList.add('hidden');
-            modal.classList.remove('flex');
+            if (modal) {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }
+            if (!fromPopState && history.state && history.state.modal === 'mode') {
+                history.back();
+            }
         }
 
         function confirmOutletMode(mode) {
@@ -639,8 +690,12 @@
                 modeBadge.innerText = selectedMode;
                 if (selectedMode === 'VF') {
                     modeBadge.className = "bg-purple-100 text-purple-700 px-2 py-0.5 rounded-md text-[10px] font-extrabold shrink-0";
+                    const inputEl = document.getElementById('manualBarcodeInput');
+                    if (inputEl) inputEl.placeholder = "Input barcode VF (15 digit)...";
                 } else {
                     modeBadge.className = "bg-red-100 text-red-600 px-2 py-0.5 rounded-md text-[10px] font-extrabold shrink-0";
+                    const inputEl = document.getElementById('manualBarcodeInput');
+                    if (inputEl) inputEl.placeholder = "Input manual barcode...";
                 }
             }
             scannedData = [];
@@ -661,34 +716,51 @@
         }
 
         async function goBack() {
-            if (currentView === 'history') {
-                switchView(previousView);
-            } else if (currentView === 'outlets') {
-                localStorage.removeItem('savedSalesId');
-                selectedSales = null;
-                dbHistoryData = []; // Bersihkan histori sales jika logout
-                document.getElementById('searchSales').value = '';
-                renderSalesList(dataMaster);
-                switchView('sales');
-            } else if (currentView === 'scanner') {
-                if(scannedData.length > 0) {
-                    const confirmBack = confirm("Ada data yang belum di-submit. Yakin ingin kembali? Data scan akan hilang.");
-                    if(!confirmBack) return;
+            const modalMode = document.getElementById('modalMode');
+            if (modalMode && !modalMode.classList.contains('hidden')) {
+                closeOutletModal();
+                return;
+            }
+
+            if (window.history.length > 1 && history.state) {
+                window.history.back();
+            } else {
+                if (currentView === 'history') {
+                    switchView(previousView || 'outlets');
+                } else if (currentView === 'outlets') {
+                    localStorage.removeItem('savedSalesId');
+                    selectedSales = null;
+                    dbHistoryData = []; 
+                    document.getElementById('searchSales').value = '';
+                    renderSalesList(dataMaster);
+                    switchView('sales');
+                } else if (currentView === 'scanner') {
+                    if (scannedData && scannedData.length > 0) {
+                        const confirmBack = confirm("Ada data yang belum di-submit. Yakin ingin kembali? Data scan akan hilang.");
+                        if (!confirmBack) return;
+                    }
+                    await stopScanner(); 
+                    selectedOutlet = null;
+                    switchView('outlets');
                 }
-                await stopScanner(); 
-                selectedOutlet = null;
-                switchView('outlets');
             }
         }
 
-        function switchView(viewName) {
+        function switchView(viewName, pushState = true) {
             document.getElementById('view-sales').classList.add('hidden');
             document.getElementById('view-outlets').classList.add('hidden');
             document.getElementById('view-scanner').classList.add('hidden');
             document.getElementById('view-history').classList.add('hidden');
             
-            document.getElementById(`view-${viewName}`).classList.remove('hidden');
+            const targetEl = document.getElementById(`view-${viewName}`);
+            if (targetEl) targetEl.classList.remove('hidden');
             currentView = viewName;
+
+            if (pushState) {
+                if (!history.state || history.state.view !== viewName) {
+                    history.pushState({ view: viewName }, '', `#${viewName}`);
+                }
+            }
 
             const btnBack = document.getElementById('btnBack');
             const btnHistory = document.getElementById('btnHistory');
@@ -762,13 +834,13 @@
                 container.classList.remove('hidden');
                 btn.classList.replace('bg-gray-100', 'bg-red-100');
                 btn.classList.replace('text-gray-500', 'text-red-600');
-                document.getElementById('manualBarcodeInput').placeholder = "Input Msisdn awal...";
+                document.getElementById('manualBarcodeInput').placeholder = selectedMode === 'VF' ? "Input Barcode VF awal..." : "Input Msisdn awal...";
             } else {
                 container.classList.add('hidden');
                 btn.classList.replace('bg-red-100', 'bg-gray-100');
                 btn.classList.replace('text-red-600', 'text-gray-500');
                 document.getElementById('manualBarcodeEndInput').value = '';
-                document.getElementById('manualBarcodeInput').placeholder = "Input manual barcode...";
+                document.getElementById('manualBarcodeInput').placeholder = selectedMode === 'VF' ? "Input barcode VF (15 digit)..." : "Input manual barcode...";
             }
         }
 
@@ -900,14 +972,21 @@
         function processBarcode(decodedText, isBatch = false) {
             let cleanText = decodedText.trim();
 
-            if (selectedMode !== 'VF' && cleanText.length > 11) {
-                cleanText = cleanText.slice(-11);
+            if (selectedMode === 'VF') {
+                if (cleanText.length > 15) {
+                    cleanText = cleanText.slice(-15);
+                }
+            } else {
+                if (cleanText.length > 11) {
+                    cleanText = cleanText.slice(-11);
+                }
             }
 
             if (scannedBarcodesDB.has(cleanText)) {
                 if (!isBatch) {
                     if (navigator.vibrate) navigator.vibrate([100, 100, 100]); 
-                    showToast(`Msisdn sudah ada`, 'error');
+                    const label = selectedMode === 'VF' ? 'Barcode VF' : 'Msisdn';
+                    showToast(`${label} sudah ada di database`, 'error');
                 }
                 return false; 
             }
@@ -916,7 +995,8 @@
             if (alreadyInCart) {
                 if (!isBatch) {
                     if (navigator.vibrate) navigator.vibrate([100, 100, 100]); 
-                    showToast(`Msisdn sudah ada`, 'error');
+                    const label = selectedMode === 'VF' ? 'Barcode VF' : 'Msisdn';
+                    showToast(`${label} sudah ada di keranjang`, 'error');
                 }
                 return false; 
             }
