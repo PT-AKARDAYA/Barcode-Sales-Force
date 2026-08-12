@@ -1,0 +1,6 @@
+{
+  "name": "Barcode Sales App",
+  "description": "Aplikasi Barcode Sales untuk pencatatan kunjungan outlet dan scan barcode msisdn.",
+  "requestFramePermissions": ["camera"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

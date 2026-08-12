@@ -1,0 +1,1279 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Barcode Sales App</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts untuk tampilan Gen Z -->
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <!-- Library untuk Barcode Scanner -->
+    <script src="https://unpkg.com/html5-qrcode"></script>
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        /* Mencegah pull-to-refresh di HP */
+        body { 
+            overscroll-behavior-y: contain; 
+            font-family: 'Plus Jakarta Sans', sans-serif;
+        }
+        
+        /* Sembunyikan scrollbar agar lebih clean (Native App feel) */
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+        /* Styling untuk frame kamera */
+        #reader { width: 100%; border-radius: 1.5rem; overflow: hidden; border: 4px solid #ffe4e6; box-shadow: 0 8px 20px 0 rgba(225, 29, 72, 0.15); background-color: #000; position: relative;}
+        #reader video { object-fit: cover; border-radius: 1rem; width: 100% !important; max-height: 35vh !important; }
+        
+        /* Animasi fade in */
+        .fade-in { animation: fadeIn 0.3s ease-in-out; }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        /* Loading spinner */
+        .loader {
+            border: 3px solid #f3f3f3;
+            border-top: 3px solid #e11d48; /* Warna merah */
+            border-radius: 50%;
+            width: 20px;
+            height: 20px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    </style>
+</head>
+<body class="bg-rose-50/50 text-gray-800 h-[100dvh] w-full flex flex-col items-center justify-center selection:bg-red-200 selection:text-red-900 overflow-hidden">
+
+    <!-- Container Utama -->
+    <div class="max-w-md w-full h-full md:h-[96dvh] mx-auto bg-white flex flex-col relative overflow-hidden md:rounded-3xl md:shadow-[0_20px_60px_-15px_rgba(225,29,72,0.15)] md:border border-rose-100 shadow-xl">
+        
+        <!-- Navbar -->
+        <nav class="bg-gradient-to-r from-red-600 to-rose-500 text-white p-5 shadow-md shrink-0 flex items-center justify-between z-10 relative rounded-b-3xl mb-2">
+            <div class="flex items-center gap-3">
+                <button id="btnBack" class="hidden p-2 hover:bg-white/20 rounded-full transition backdrop-blur-sm" onclick="goBack()">
+                    <i data-lucide="arrow-left" class="w-6 h-6"></i>
+                </button>
+                <h1 class="text-2xl font-extrabold tracking-tight" id="appTitle">Barcode Sales</h1>
+            </div>
+            
+            <div class="flex items-center gap-2">
+                <button id="btnHistory" onclick="openHistory()" class="bg-white/20 p-2 rounded-full backdrop-blur-sm hover:bg-white/30 transition">
+                    <i data-lucide="history" class="w-5 h-5"></i>
+                </button>
+                <div id="iconScanner" class="bg-white/20 p-2 rounded-full backdrop-blur-sm hidden">
+                    <i data-lucide="scan-line" class="w-5 h-5"></i>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Area Konten Utama -->
+        <main class="flex-1 overflow-y-auto no-scrollbar relative flex flex-col">
+
+            <!-- ================= VIEW 1: PILIH SALES ================= -->
+            <div id="view-sales" class="p-4 fade-in flex flex-col h-full">
+                <div class="mb-6 shrink-0">
+                    <h2 class="text-2xl font-extrabold text-gray-900 mb-1">Hai, Siapa kamu? 👋</h2>
+                    <p class="text-sm text-gray-500 font-medium">Pilih nama akun sales kamu di bawah ini.</p>
+                </div>
+
+                <!-- Search Input -->
+                <div class="relative mb-4 shrink-0">
+                    <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <i data-lucide="search" class="w-5 h-5 text-gray-400"></i>
+                    </div>
+                    <input type="text" id="searchSales" onkeyup="filterSales()" class="bg-gray-50 border-2 border-gray-100 text-gray-900 text-sm rounded-2xl focus:ring-red-500 focus:border-red-500 block w-full pl-11 p-4 font-bold transition outline-none" placeholder="Cari nama sales...">
+                </div>
+
+                <!-- List Sales -->
+                <div id="salesListContainer" class="space-y-3 pb-6 flex-1 overflow-y-auto no-scrollbar">
+                    <!-- Data sales di-render lewat JS -->
+                </div>
+            </div>
+
+            <!-- ================= VIEW 2: PILIH OUTLET ================= -->
+            <div id="view-outlets" class="p-4 fade-in hidden flex flex-col h-full">
+                <div class="mb-6 shrink-0 bg-gradient-to-br from-rose-50 to-red-50 border border-rose-100 p-4 rounded-2xl flex items-center gap-4 shadow-sm">
+                    <div class="bg-white p-3 rounded-xl text-red-600 shadow-sm">
+                        <i data-lucide="user-check" class="w-6 h-6"></i>
+                    </div>
+                    <div>
+                        <p class="text-xs text-red-500 font-bold uppercase tracking-wider">Sales Aktif</p>
+                        <p class="text-lg font-extrabold text-gray-900" id="lblSelectedSales">-</p>
+                    </div>
+                </div>
+
+                <div class="mb-4 shrink-0 flex justify-between items-center gap-2">
+                    <div>
+                        <h2 class="text-2xl font-extrabold text-gray-900 mb-1">Kunjungan Outlet 🏪</h2>
+                        <p class="text-sm text-gray-500 font-medium">Pilih toko yang sedang dikunjungi.</p>
+                    </div>
+                    <div class="bg-red-100 text-red-600 px-3 py-1.5 rounded-xl text-sm font-extrabold shadow-sm whitespace-nowrap text-center">
+                        <span id="outletCount" class="text-lg">0</span>
+                        <span class="block text-[10px] uppercase tracking-wider mt-[-2px]">Toko</span>
+                    </div>
+                </div>
+
+                <!-- Search Input -->
+                <div class="relative mb-4 shrink-0">
+                    <div class="absolute inset-y-0 left-0 pl-4 flex items-center pointer-events-none">
+                        <i data-lucide="search" class="w-5 h-5 text-gray-400"></i>
+                    </div>
+                    <input type="text" id="searchOutlet" onkeyup="filterOutlets()" class="bg-gray-50 border-2 border-gray-100 text-gray-900 text-sm rounded-2xl focus:ring-red-500 focus:border-red-500 block w-full pl-11 p-4 font-bold transition outline-none" placeholder="Cari nama outlet...">
+                </div>
+
+                <!-- List Outlet -->
+                <div id="outletListContainer" class="space-y-3 pb-6 flex-1 overflow-y-auto no-scrollbar">
+                    <!-- Data outlet di-render lewat JS -->
+                </div>
+            </div>
+
+            <!-- ================= VIEW 3: SCANNER & KERANJANG ================= -->
+            <div id="view-scanner" class="fade-in hidden flex flex-col h-full">
+                <!-- Info Kunjungan -->
+                <div class="bg-white px-4 py-3 border-b border-gray-100 flex items-center gap-3 shrink-0">
+                    <div class="bg-red-100 p-2.5 rounded-full text-red-600 shrink-0"><i data-lucide="map-pin" class="w-5 h-5"></i></div>
+                    <div class="flex-1 min-w-0">
+                        <div class="flex items-center gap-2">
+                            <p class="text-sm font-extrabold text-gray-800 truncate" id="lblSelectedOutlet">-</p>
+                            <span id="lblOutletMode" class="bg-red-100 text-red-600 px-2 py-0.5 rounded-md text-[10px] font-extrabold shrink-0">SA</span>
+                        </div>
+                        <p class="text-[11px] font-bold text-gray-500 truncate mt-0.5 flex items-center gap-1">
+                            <i data-lucide="user" class="w-3.5 h-3.5 text-red-400"></i> Sales: <span id="lblScannerSales" class="text-red-600">-</span>
+                        </p>
+                    </div>
+                </div>
+
+                <!-- Tab Tipe Transaksi -->
+                <div class="bg-gray-100 p-1 rounded-2xl flex mx-4 mt-4 shrink-0 shadow-inner overflow-x-auto no-scrollbar">
+                    <button onclick="setTab('Penjualan')" id="tab-Penjualan" class="flex-1 px-2 py-2 text-xs font-bold rounded-xl transition-all shadow-sm bg-white text-red-600 whitespace-nowrap">Penjualan</button>
+                    <button onclick="setTab('Konsi')" id="tab-Konsi" class="flex-1 px-2 py-2 text-xs font-bold rounded-xl transition-all text-gray-500 hover:text-gray-700 whitespace-nowrap">Konsi</button>
+                    <button onclick="setTab('Retur')" id="tab-Retur" class="flex-1 px-2 py-2 text-xs font-bold rounded-xl transition-all text-gray-500 hover:text-gray-700 whitespace-nowrap">Retur</button>
+                    <button onclick="setTab('Stock Outlet')" id="tab-Stock Outlet" class="flex-1 px-2 py-2 text-xs font-bold rounded-xl transition-all text-gray-500 hover:text-gray-700 whitespace-nowrap">Stock Outlet</button>
+                </div>
+
+                <!-- Area Scanner -->
+                <div class="p-4 shrink-0 bg-white">
+                    <!-- Permission Notice Box (ditampilkan saat izin kamera ditolak / kamera tidak tersedia) -->
+                    <div id="cameraPermissionNotice" class="hidden mb-3 p-4 bg-slate-900 text-white rounded-2xl border border-rose-500/40 text-center flex flex-col items-center justify-center fade-in">
+                        <div class="bg-rose-500/20 p-2.5 rounded-full text-rose-400 mb-2">
+                            <i data-lucide="camera-off" class="w-6 h-6"></i>
+                        </div>
+                        <p class="font-extrabold text-xs text-rose-100 mb-1">Akses Kamera Belum Diberikan</p>
+                        <p class="text-[11px] text-gray-300 mb-3 leading-snug">Izinkan akses kamera di browser Anda (klik ikon gembok/kamera di browser), atau gunakan input barcode manual di bawah.</p>
+                        <button onclick="requestCameraAndRetry()" class="px-3.5 py-2 bg-red-600 text-white font-extrabold text-xs rounded-xl shadow-md hover:bg-red-700 active:scale-95 transition flex items-center gap-1.5">
+                            <i data-lucide="refresh-cw" class="w-3.5 h-3.5"></i> Coba Minta Izin Kamera
+                        </button>
+                    </div>
+
+                    <div id="reader"></div>
+                    <div class="flex justify-between items-center mt-3 px-1">
+                        <p class="text-xs text-gray-500 font-bold flex items-center gap-1.5"><i data-lucide="focus" class="w-4 h-4 text-red-500"></i> Arahkan kamera ke Barcode</p>
+                        <button onclick="toggleCamera()" id="btnCameraToggle" class="text-xs font-extrabold px-4 py-2 rounded-xl transition-all shadow-sm bg-rose-100 text-rose-600 hover:bg-rose-200 active:scale-95">Stop Kamera</button>
+                    </div>
+                    
+                    <!-- Input Manual Barcode -->
+                    <div class="mt-3 px-1 flex flex-col gap-2">
+                        <div class="flex items-center gap-2">
+                            <input type="text" inputmode="numeric" id="manualBarcodeInput" onkeypress="handleManualInput(event)" class="bg-gray-50 border-2 border-gray-100 text-gray-900 text-sm rounded-xl focus:ring-red-500 focus:border-red-500 block w-full p-2.5 font-bold transition outline-none" placeholder="Input Msisdn manual...">
+                            <button onclick="toggleRangeInput()" id="btnToggleRange" class="bg-gray-100 text-gray-500 p-2.5 rounded-xl hover:bg-gray-200 active:scale-95 transition-all shadow-sm shrink-0" title="Mode Range Barcode">
+                                <i data-lucide="list-plus" class="w-5 h-5"></i>
+                            </button>
+                            <button onclick="addManualBarcode()" class="bg-red-600 text-white p-2.5 rounded-xl hover:bg-red-700 active:scale-95 transition-all shadow-[0_4px_10px_-2px_rgba(225,29,72,0.4)] shrink-0">
+                                <i data-lucide="plus" class="w-5 h-5"></i>
+                            </button>
+                        </div>
+                        
+                        <div id="rangeInputContainer" class="hidden flex items-center gap-2 fade-in">
+                            <div class="bg-rose-50 border border-rose-100 px-3 py-2.5 rounded-xl text-red-500 font-bold text-sm shrink-0">s/d</div>
+                            <input type="text" inputmode="numeric" id="manualBarcodeEndInput" onkeypress="handleManualInput(event)" class="bg-rose-50 border-2 border-rose-100 text-red-900 text-sm rounded-xl focus:ring-red-500 focus:border-red-500 block w-full p-2.5 font-bold transition outline-none" placeholder="Input Msisdn akhir...">
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hasil Scan -->
+                <div class="flex-1 overflow-y-auto no-scrollbar px-4 pt-2 bg-gray-50/50">
+                    <div class="flex justify-between items-center mb-3">
+                        <h3 class="text-sm font-extrabold text-gray-900">Daftar Scan <span class="bg-red-100 text-red-600 px-2.5 py-0.5 rounded-full ml-1" id="scanCount">0</span></h3>
+                    </div>
+                    
+                    <div id="scannedList" class="space-y-3 pb-32">
+                        <!-- Jika kosong -->
+                        <div id="emptyScanState" class="text-center py-10 mt-4">
+                            <div class="bg-white w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-dashed border-red-200 shadow-sm">
+                                <i data-lucide="ghost" class="w-10 h-10 text-red-300"></i>
+                            </div>
+                            <p class="text-sm font-bold text-gray-400">Keranjang scan masih kosong nih.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Tombol Submit Floating -->
+                <div class="absolute bottom-0 left-0 right-0 p-4 bg-white/80 backdrop-blur-md border-t border-rose-50 pb-6 pt-4 z-20">
+                    <button id="btnSubmitData" onclick="submitData()" disabled class="w-full bg-red-600 text-white font-extrabold py-4 rounded-2xl shadow-[0_8px_20px_-6px_rgba(225,29,72,0.6)] hover:bg-red-700 hover:-translate-y-1 active:scale-95 disabled:transform-none disabled:bg-gray-200 disabled:text-gray-400 disabled:shadow-none transition-all flex items-center justify-center gap-2 text-lg">
+                        <i data-lucide="send-h" class="w-6 h-6"></i>
+                        Kirim Data Scan
+                    </button>
+                </div>
+            </div>
+
+            <!-- ================= VIEW 4: HISTORY SCAN ================= -->
+            <div id="view-history" class="fade-in hidden flex flex-col h-full bg-gray-50/50">
+                <div class="p-4 shrink-0 bg-white border-b border-gray-100 shadow-sm z-10">
+                    <div class="flex justify-between items-center">
+                        <div>
+                            <h2 class="text-xl font-extrabold text-gray-900">Riwayat Scan Pribadi 🗃️</h2>
+                            <p class="text-sm text-gray-500 font-medium">Hanya menampilkan scan oleh: <span id="histSalesName" class="font-bold text-red-500"></span></p>
+                        </div>
+                        <div id="syncIndicator" class="hidden flex items-center gap-1.5 text-xs font-bold text-green-600 bg-green-50 px-2 py-1 rounded-full shadow-inner border border-green-100">
+                            <i data-lucide="refresh-cw" class="w-3 h-3 animate-spin"></i> Syncing
+                        </div>
+                    </div>
+                    
+                    <!-- TAB UNTUK HISTORY -->
+                    <div class="bg-gray-100 p-1 rounded-2xl flex mt-4 shadow-inner overflow-x-auto no-scrollbar">
+                        <button onclick="setHistoryTab('Penjualan')" id="hist-tab-Penjualan" class="flex-1 px-2 py-2 text-[11px] font-bold rounded-xl transition-all shadow-sm bg-white text-red-600 whitespace-nowrap">Penjualan</button>
+                        <button onclick="setHistoryTab('Konsi')" id="hist-tab-Konsi" class="flex-1 px-2 py-2 text-[11px] font-bold rounded-xl transition-all text-gray-500 hover:text-gray-700 whitespace-nowrap">Konsi</button>
+                        <button onclick="setHistoryTab('Retur')" id="hist-tab-Retur" class="flex-1 px-2 py-2 text-[11px] font-bold rounded-xl transition-all text-gray-500 hover:text-gray-700 whitespace-nowrap">Retur</button>
+                        <button onclick="setHistoryTab('Stock Outlet')" id="hist-tab-Stock Outlet" class="flex-1 px-2 py-2 text-[11px] font-bold rounded-xl transition-all text-gray-500 hover:text-gray-700 whitespace-nowrap">Stock Outlet</button>
+                    </div>
+                </div>
+                
+                <div id="historyListContainer" class="flex-1 overflow-y-auto no-scrollbar p-4 pb-10">
+                    <!-- Data histori di-render lewat JS -->
+                    <div class="text-center py-10">
+                        <div class="loader mx-auto mb-4 border-gray-300 border-t-red-500"></div>
+                        <p class="text-sm font-bold text-gray-400">Memuat riwayat...</p>
+                    </div>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <!-- Modal Pilih Mode SA / VF -->
+    <div id="modalMode" class="fixed inset-0 bg-black/60 backdrop-blur-sm z-[55] hidden flex items-center justify-center p-4 fade-in">
+        <div class="bg-white w-full max-w-sm rounded-3xl p-6 shadow-2xl border border-rose-100 flex flex-col items-center text-center">
+            <div class="bg-red-100 p-3.5 rounded-full text-red-600 mb-3 shadow-sm">
+                <i data-lucide="qr-code" class="w-8 h-8"></i>
+            </div>
+            <h3 class="text-xl font-extrabold text-gray-900 mb-1" id="modalOutletName">Pilih Mode Outlet</h3>
+            <p class="text-xs text-gray-500 font-medium mb-6">Pilih format pemrosesan barcode untuk kunjungan toko ini.</p>
+            
+            <div class="grid grid-cols-2 gap-3 w-full mb-4">
+                <button onclick="confirmOutletMode('SA')" class="flex flex-col items-center justify-center p-4 bg-rose-50 border-2 border-rose-200 rounded-2xl hover:bg-red-600 hover:text-white hover:border-red-600 transition-all group active:scale-95 shadow-sm">
+                    <span class="text-2xl font-black text-red-600 group-hover:text-white mb-1">SA</span>
+                    <span class="text-[11px] font-bold text-gray-600 group-hover:text-white/90">11 Digit Terakhir</span>
+                </button>
+                <button onclick="confirmOutletMode('VF')" class="flex flex-col items-center justify-center p-4 bg-rose-50 border-2 border-rose-200 rounded-2xl hover:bg-purple-600 hover:text-white hover:border-purple-600 transition-all group active:scale-95 shadow-sm">
+                    <span class="text-2xl font-black text-purple-600 group-hover:text-white mb-1">VF</span>
+                    <span class="text-[11px] font-bold text-gray-600 group-hover:text-white/90">Full Barcode</span>
+                </button>
+            </div>
+
+            <button onclick="closeOutletModal()" class="text-xs font-bold text-gray-400 hover:text-gray-600 py-2">
+                Batal
+            </button>
+        </div>
+    </div>
+
+    <!-- Message Box untuk Notifikasi (Toast) -->
+    <div id="toastMsg" class="fixed top-4 left-1/2 transform -translate-x-1/2 max-w-sm w-[90%] bg-gray-800 text-white px-4 py-3 rounded-lg shadow-xl opacity-0 pointer-events-none transition-opacity duration-300 z-50 flex items-center gap-3">
+        <i id="toastIcon" data-lucide="info" class="w-5 h-5"></i>
+        <p id="toastText" class="text-sm font-medium"></p>
+    </div>
+
+    <!-- Loading Screen -->
+    <div id="loadingOverlay" class="fixed inset-0 bg-black bg-opacity-60 z-[60] hidden flex-col items-center justify-center text-white">
+        <div class="loader mb-4"></div>
+        <p class="font-medium" id="loadingText">Menyiapkan data...</p>
+    </div>
+
+    <script>
+        // SETUP URL GOOGLE APPS SCRIPT
+        const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbzCSx424He8UzDIcdVP696cRurVlrWGuL8fR8GwAt49ZgYR16SWfqQbGmlE9qtP9rox/exec";
+
+        // ================= HELPER FUNCTION GLOBAL =================
+        const getV = (row, keyMatch) => {
+            if(!row) return '';
+            const found = Object.keys(row).find(k => String(k).toLowerCase().replace(/[^a-z0-9]/g, '') === keyMatch);
+            return found ? row[found] : '';
+        };
+
+        // Helper Fetch dengan Timeout agar tidak menggantung (hanging) terus menerus
+        async function fetchWithTimeout(url, options = {}, timeoutMs = 25000) {
+            const controller = new AbortController();
+            const id = setTimeout(() => {
+                try {
+                    controller.abort("Timeout koneksi server (" + timeoutMs + "ms)");
+                } catch (e) {
+                    controller.abort();
+                }
+            }, timeoutMs);
+            try {
+                const response = await fetch(url, { ...options, signal: controller.signal });
+                clearTimeout(id);
+                return response;
+            } catch (error) {
+                clearTimeout(id);
+                throw error;
+            }
+        }
+
+        // ================= STATE MANAGEMENT =================
+        let dataMaster = []; 
+        let currentView = 'sales'; 
+        let previousView = 'sales'; 
+        let selectedSales = null;
+        let selectedOutlet = null;
+        let selectedMode = 'SA'; // 'SA' (11 digit) atau 'VF' (full barcode)
+        let pendingOutlet = null;
+        let currentTab = 'Penjualan'; 
+        let currentHistoryTab = 'Penjualan'; 
+        let scannedData = []; 
+        
+        let dbHistoryData = []; // Hanya menyimpan histori Sales yang login
+        let scannedBarcodesDB = new Set(); // Global array barcode (sangat ringan) untuk pencegah duplikat
+        
+        let html5QrCode;
+        let isCameraRunning = false;
+        let isCameraTransitioning = false; 
+
+        let currentHistoryLimit = 20; // Render awal diturunkan jadi 20 data agar makin enteng
+        let historyObserver = null;
+
+        lucide.createIcons();
+
+        // ================= INISIALISASI & RENDERING =================
+        window.onload = () => {
+            fetchInitialData();
+        };
+
+        async function fetchInitialData() {
+            const overlay = document.getElementById('loadingOverlay');
+            const loadingText = document.getElementById('loadingText');
+            
+            // 1. Coba muat cache terlebih dahulu agar aplikasi bisa tampil LANGSUNG (0ms delay)
+            const hasCached = loadCachedOutletData();
+            if (hasCached) {
+                checkAutoLogin();
+            } else {
+                loadingText.innerText = "Memeriksa data...";
+                overlay.classList.remove('hidden');
+                overlay.classList.add('flex');
+            }
+
+            try {
+                // 2. Tarik Data Outlet dan Barcode secara PARALEL (simultan) agar 2x lebih cepat
+                const outletPromise = fetchWithTimeout(SCRIPT_URL + "?action=getOutlet", {}, 25000)
+                    .then(r => r.json())
+                    .then(res => {
+                        if (res.status === 'success' && Array.isArray(res.data)) {
+                            processOutletData(res.data);
+                            try {
+                                localStorage.setItem('cachedOutletData', JSON.stringify(res.data));
+                            } catch (e) {}
+                        }
+                    })
+                    .catch(e => console.warn("Gagal tarik outlet:", e));
+
+                const barcodePromise = fetchWithTimeout(SCRIPT_URL + "?action=getBarcodes", {}, 15000)
+                    .then(r => r.json())
+                    .then(res => {
+                        if (res.status === 'success' && Array.isArray(res.data)) {
+                            scannedBarcodesDB.clear();
+                            res.data.forEach(b => {
+                                let cleanBarcode = String(b).replace(/^'/, '').trim();
+                                if(cleanBarcode) {
+                                    scannedBarcodesDB.add(cleanBarcode);
+                                    if (cleanBarcode.length > 11) {
+                                        scannedBarcodesDB.add(cleanBarcode.slice(-11));
+                                    }
+                                }
+                            });
+                        }
+                    })
+                    .catch(e => console.warn("Gagal tarik barcodes:", e));
+
+                // Tunggu data outlet selesai (barcode berjalan di background)
+                await outletPromise;
+
+                // Update tampilan dengan data segar dari server jika belum auto-login
+                if (!selectedSales) {
+                    checkAutoLogin();
+                }
+
+                // Selesaikan barcode
+                await barcodePromise;
+
+            } catch (error) {
+                console.error("Fetch initial data error:", error);
+                if (!hasCached) {
+                    loadCachedOutletData();
+                    checkAutoLogin();
+                }
+            } finally {
+                overlay.classList.add('hidden');
+                overlay.classList.remove('flex');
+            }
+        }
+
+        function loadCachedOutletData() {
+            try {
+                const cached = localStorage.getItem('cachedOutletData');
+                if (cached) {
+                    const parsed = JSON.parse(cached);
+                    if (Array.isArray(parsed) && parsed.length > 0) {
+                        processOutletData(parsed);
+                        return true;
+                    }
+                }
+            } catch(e) {
+                console.warn("Gagal membaca cache outlet:", e);
+            }
+            return false;
+        }
+
+        // Fungsi baru: Khusus menarik History Detail milik Sales tertentu dari server
+        async function fetchHistoryForSales(salesName, showIndicator = false) {
+            if (!salesName) return;
+            const syncIcon = document.getElementById('syncIndicator');
+            if (showIndicator && syncIcon) syncIcon.classList.remove('hidden');
+
+            try {
+                // Mengirim parameter salesName ke server
+                const url = SCRIPT_URL + "?action=getHistory&salesName=" + encodeURIComponent(salesName);
+                const res = await fetchWithTimeout(url, {}, 20000);
+                const result = await res.json();
+                
+                if (result.status === 'success') {
+                    dbHistoryData = result.data; 
+                    if (currentView === 'history') {
+                        renderHistoryList();
+                    }
+                }
+            } catch (e) {
+                console.log("Background sync gagal.", e);
+            } finally {
+                if (showIndicator && syncIcon) syncIcon.classList.add('hidden');
+            }
+        }
+
+        function processOutletData(flatData) {
+            const groupedData = {};
+            flatData.forEach(row => {
+                let sId = String(getV(row, 'idsales')).trim();
+                const sName = String(getV(row, 'namasales')).trim();
+                let oId = String(getV(row, 'idoutlet')).trim();
+                const oName = String(getV(row, 'namaoutlet')).trim();
+
+                if (!sId || sId === 'undefined' || sId === '') sId = sName;
+                if (!oId || oId === 'undefined' || oId === '') oId = oName;
+                if (!sName || sName === 'undefined' || sName === '') return;
+
+                if (!groupedData[sId]) groupedData[sId] = { id: sId, name: sName, outlets: [] };
+                if (oName && oName !== 'undefined' && oName !== '') groupedData[sId].outlets.push({ id: oId, name: oName });
+            });
+            dataMaster = Object.values(groupedData);
+        }
+
+        function checkAutoLogin() {
+            const savedSalesId = localStorage.getItem('savedSalesId');
+            if (savedSalesId) {
+                const foundSales = dataMaster.find(s => s.id === savedSalesId);
+                if (foundSales) {
+                    selectSales(foundSales);
+                    return; 
+                }
+            }
+            renderSalesList(dataMaster);
+        }
+
+        // ================= RENDER LIST =================
+        function renderSalesList(data) {
+            const container = document.getElementById('salesListContainer');
+            container.innerHTML = '';
+            
+            if(data.length === 0) {
+                container.innerHTML = `<p class="text-center text-gray-500 text-sm mt-4 font-medium">Hmm, sales tidak ditemukan 🕵️‍♂️</p>`;
+                return;
+            }
+
+            data.forEach(sales => {
+                const btn = document.createElement('button');
+                btn.className = "w-full flex items-center justify-between p-4 bg-white border-2 border-gray-100 rounded-2xl hover:border-red-300 hover:bg-rose-50 hover:shadow-md transition-all text-left group";
+                btn.onclick = () => selectSales(sales);
+                btn.innerHTML = `
+                    <div class="flex items-center gap-4">
+                        <div class="bg-gray-50 p-3 rounded-full group-hover:bg-red-100 group-hover:text-red-600 transition-colors"><i data-lucide="user" class="w-5 h-5 text-gray-500 group-hover:text-red-600"></i></div>
+                        <div>
+                            <p class="font-extrabold text-gray-900 text-base">${sales.name}</p>
+                            <p class="text-xs font-bold text-gray-400 mt-0.5 tracking-wider uppercase">ID: ${sales.id}</p>
+                        </div>
+                    </div>
+                    <div class="bg-gray-50 p-2 rounded-full group-hover:bg-red-500 group-hover:text-white transition-colors">
+                        <i data-lucide="arrow-right" class="w-4 h-4 text-gray-400 group-hover:text-white"></i>
+                    </div>
+                `;
+                container.appendChild(btn);
+            });
+            lucide.createIcons();
+        }
+
+        function renderOutletList(data) {
+            const container = document.getElementById('outletListContainer');
+            container.innerHTML = '';
+            document.getElementById('outletCount').innerText = data.length;
+            
+            if(data.length === 0) {
+                container.innerHTML = `<p class="text-center text-gray-500 text-sm mt-4 font-medium">Outlet tidak ditemukan 🕵️‍♂️</p>`;
+                return;
+            }
+
+            data.forEach(outlet => {
+                const btn = document.createElement('button');
+                btn.className = "w-full flex items-center justify-between p-4 bg-white border-2 border-gray-100 rounded-2xl hover:border-red-300 hover:bg-rose-50 hover:shadow-md transition-all text-left group";
+                btn.onclick = () => openOutletModal(outlet);
+                btn.innerHTML = `
+                    <div class="flex items-center gap-4">
+                        <div class="bg-rose-50 p-3 rounded-full text-red-600 group-hover:bg-red-600 group-hover:text-white transition-colors"><i data-lucide="store" class="w-5 h-5"></i></div>
+                        <div>
+                            <p class="font-extrabold text-gray-900 text-base">${outlet.name}</p>
+                            <p class="text-xs font-bold text-gray-400 mt-0.5 tracking-wider uppercase">ID: ${outlet.id}</p>
+                        </div>
+                    </div>
+                    <div class="bg-gray-50 p-2 rounded-full group-hover:bg-red-500 group-hover:text-white transition-colors">
+                        <i data-lucide="arrow-right" class="w-4 h-4 text-gray-400 group-hover:text-white"></i>
+                    </div>
+                `;
+                container.appendChild(btn);
+            });
+            lucide.createIcons();
+        }
+
+        // ================= MODAL SA / VF =================
+        function openOutletModal(outlet) {
+            pendingOutlet = outlet;
+            document.getElementById('modalOutletName').innerText = outlet.name;
+            const modal = document.getElementById('modalMode');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+            lucide.createIcons();
+        }
+
+        function closeOutletModal() {
+            pendingOutlet = null;
+            const modal = document.getElementById('modalMode');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function confirmOutletMode(mode) {
+            selectedMode = mode;
+            const outletToSelect = pendingOutlet;
+            closeOutletModal();
+            if (outletToSelect) {
+                selectOutlet(outletToSelect);
+            }
+        }
+
+        // ================= SEARCH & FILTER =================
+        function filterSales() {
+            const input = document.getElementById('searchSales').value.toLowerCase();
+            const filtered = dataMaster.filter(s => s.name.toLowerCase().includes(input) || s.id.toLowerCase().includes(input));
+            renderSalesList(filtered);
+        }
+
+        function filterOutlets() {
+            if(!selectedSales) return;
+            const input = document.getElementById('searchOutlet').value.toLowerCase();
+            const filtered = selectedSales.outlets.filter(o => o.name.toLowerCase().includes(input) || o.id.toLowerCase().includes(input));
+            renderOutletList(filtered);
+        }
+
+        // ================= NAVIGASI =================
+        function selectSales(sales) {
+            localStorage.setItem('savedSalesId', sales.id);
+            selectedSales = sales;
+            document.getElementById('lblSelectedSales').innerText = sales.name;
+            document.getElementById('lblScannerSales').innerText = sales.name;
+            document.getElementById('searchOutlet').value = '';
+            document.getElementById('histSalesName').innerText = sales.name;
+
+            // Langsung tarik histori spesifik sales ini di latar belakang
+            fetchHistoryForSales(sales.name, false);
+
+            renderOutletList(sales.outlets);
+            switchView('outlets');
+        }
+
+        function selectOutlet(outlet) {
+            selectedOutlet = outlet;
+            document.getElementById('lblSelectedOutlet').innerText = outlet.name;
+            const modeBadge = document.getElementById('lblOutletMode');
+            if (modeBadge) {
+                modeBadge.innerText = selectedMode;
+                if (selectedMode === 'VF') {
+                    modeBadge.className = "bg-purple-100 text-purple-700 px-2 py-0.5 rounded-md text-[10px] font-extrabold shrink-0";
+                } else {
+                    modeBadge.className = "bg-red-100 text-red-600 px-2 py-0.5 rounded-md text-[10px] font-extrabold shrink-0";
+                }
+            }
+            scannedData = [];
+            renderScannedList();
+            setTab('Penjualan');
+            switchView('scanner');
+            
+            setTimeout(async () => { await initScanner(); }, 300);
+        }
+
+        function openHistory() {
+            previousView = currentView;
+            setHistoryTab('Penjualan'); 
+            switchView('history');
+            if(selectedSales) {
+                fetchHistoryForSales(selectedSales.name, true);
+            }
+        }
+
+        async function goBack() {
+            if (currentView === 'history') {
+                switchView(previousView);
+            } else if (currentView === 'outlets') {
+                localStorage.removeItem('savedSalesId');
+                selectedSales = null;
+                dbHistoryData = []; // Bersihkan histori sales jika logout
+                document.getElementById('searchSales').value = '';
+                renderSalesList(dataMaster);
+                switchView('sales');
+            } else if (currentView === 'scanner') {
+                if(scannedData.length > 0) {
+                    const confirmBack = confirm("Ada data yang belum di-submit. Yakin ingin kembali? Data scan akan hilang.");
+                    if(!confirmBack) return;
+                }
+                await stopScanner(); 
+                selectedOutlet = null;
+                switchView('outlets');
+            }
+        }
+
+        function switchView(viewName) {
+            document.getElementById('view-sales').classList.add('hidden');
+            document.getElementById('view-outlets').classList.add('hidden');
+            document.getElementById('view-scanner').classList.add('hidden');
+            document.getElementById('view-history').classList.add('hidden');
+            
+            document.getElementById(`view-${viewName}`).classList.remove('hidden');
+            currentView = viewName;
+
+            const btnBack = document.getElementById('btnBack');
+            const btnHistory = document.getElementById('btnHistory');
+            const iconScanner = document.getElementById('iconScanner');
+            const appTitle = document.getElementById('appTitle');
+            
+            if (viewName === 'sales') {
+                btnBack.classList.add('hidden');
+                btnHistory.classList.remove('hidden');
+                iconScanner.classList.add('hidden');
+                appTitle.innerText = "Barcode Sales";
+            } else if (viewName === 'outlets') {
+                btnBack.classList.remove('hidden');
+                btnHistory.classList.remove('hidden');
+                iconScanner.classList.add('hidden');
+                appTitle.innerText = "Pilih Outlet";
+            } else if (viewName === 'scanner') {
+                btnBack.classList.remove('hidden');
+                btnHistory.classList.add('hidden');
+                iconScanner.classList.remove('hidden');
+                appTitle.innerText = "Scanner";
+            } else if (viewName === 'history') {
+                btnBack.classList.remove('hidden');
+                btnHistory.classList.add('hidden');
+                iconScanner.classList.add('hidden');
+                appTitle.innerText = "Histori Scanner";
+            }
+        }
+
+        // ================= TAB MANAGEMENT =================
+        function setTab(tabName) {
+            currentTab = tabName;
+            ['Penjualan', 'Konsi', 'Retur', 'Stock Outlet'].forEach(tab => {
+                const el = document.getElementById(`tab-${tab}`);
+                if (el) {
+                    el.classList.remove('bg-white', 'text-red-600', 'shadow-sm');
+                    el.classList.add('text-gray-500');
+                }
+            });
+            const activeEl = document.getElementById(`tab-${tabName}`);
+            if (activeEl) {
+                activeEl.classList.remove('text-gray-500');
+                activeEl.classList.add('bg-white', 'text-red-600', 'shadow-sm');
+            }
+        }
+
+        function setHistoryTab(tabName) {
+            currentHistoryTab = tabName;
+            ['Penjualan', 'Konsi', 'Retur', 'Stock Outlet'].forEach(tab => {
+                const el = document.getElementById(`hist-tab-${tab}`);
+                if (el) {
+                    el.classList.remove('bg-white', 'text-red-600', 'shadow-sm');
+                    el.classList.add('text-gray-500');
+                }
+            });
+            const activeEl = document.getElementById(`hist-tab-${tabName}`);
+            if (activeEl) {
+                activeEl.classList.remove('text-gray-500');
+                activeEl.classList.add('bg-white', 'text-red-600', 'shadow-sm');
+            }
+            
+            currentHistoryLimit = 20; // Batas render diturunkan agar super ringan
+            renderHistoryList(); 
+        }
+
+        function toggleRangeInput() {
+            const container = document.getElementById('rangeInputContainer');
+            const btn = document.getElementById('btnToggleRange');
+            
+            if (container.classList.contains('hidden')) {
+                container.classList.remove('hidden');
+                btn.classList.replace('bg-gray-100', 'bg-red-100');
+                btn.classList.replace('text-gray-500', 'text-red-600');
+                document.getElementById('manualBarcodeInput').placeholder = "Input Msisdn awal...";
+            } else {
+                container.classList.add('hidden');
+                btn.classList.replace('bg-red-100', 'bg-gray-100');
+                btn.classList.replace('text-red-600', 'text-gray-500');
+                document.getElementById('manualBarcodeEndInput').value = '';
+                document.getElementById('manualBarcodeInput').placeholder = "Input manual barcode...";
+            }
+        }
+
+        // ================= SCANNER LOGIC =================
+        async function requestCameraAndRetry() {
+            try {
+                if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+                    await navigator.mediaDevices.getUserMedia({ video: true });
+                }
+            } catch (e) {
+                console.warn("Retry getUserMedia error:", e);
+            }
+            await initScanner();
+        }
+
+        async function initScanner() {
+            if (isCameraTransitioning || isCameraRunning) return;
+            isCameraTransitioning = true;
+
+            const permNotice = document.getElementById('cameraPermissionNotice');
+            if (permNotice) permNotice.classList.add('hidden');
+
+            try {
+                if (!html5QrCode) {
+                    const formatsToSupport = [
+                        Html5QrcodeSupportedFormats.QR_CODE,
+                        Html5QrcodeSupportedFormats.CODE_128,
+                        Html5QrcodeSupportedFormats.EAN_13,
+                        Html5QrcodeSupportedFormats.CODE_39
+                    ];
+                    html5QrCode = new Html5Qrcode("reader", { formatsToSupport: formatsToSupport });
+                }
+                
+                const boxSize = Math.min(window.innerWidth * 0.7, 250); 
+                
+                const config = { 
+                    fps: 30, 
+                    qrbox: { width: boxSize, height: boxSize }, 
+                    aspectRatio: 1.0, 
+                    experimentalFeatures: {
+                        useBarCodeDetectorIfSupported: true 
+                    }
+                };
+                
+                try {
+                    await html5QrCode.start({ facingMode: "environment" }, config, onScanSuccess, onScanFailure);
+                } catch (envErr) {
+                    console.warn("FacingMode environment failed, trying fallback:", envErr);
+                    const isPermissionErr = envErr && (
+                        envErr.name === 'NotAllowedError' || 
+                        String(envErr).includes('Permission denied') ||
+                        String(envErr).includes('NotAllowedError')
+                    );
+                    if (isPermissionErr) throw envErr;
+                    await html5QrCode.start({ facingMode: "user" }, config, onScanSuccess, onScanFailure);
+                }
+
+                isCameraRunning = true;
+                
+                const btnCameraToggle = document.getElementById('btnCameraToggle');
+                if (btnCameraToggle) {
+                    btnCameraToggle.innerText = "Stop Kamera";
+                    btnCameraToggle.classList.replace('bg-green-100', 'bg-rose-100');
+                    btnCameraToggle.classList.replace('text-green-600', 'text-rose-600');
+                }
+            } catch (err) {
+                console.error("Error starting scanner:", err);
+                isCameraRunning = false;
+
+                const btnCameraToggle = document.getElementById('btnCameraToggle');
+                if (btnCameraToggle) {
+                    btnCameraToggle.innerText = "Mulai Kamera";
+                    btnCameraToggle.classList.replace('bg-rose-100', 'bg-green-100');
+                    btnCameraToggle.classList.replace('text-rose-600', 'text-green-600');
+                }
+
+                if (permNotice) {
+                    permNotice.classList.remove('hidden');
+                    lucide.createIcons();
+                }
+
+                const errStr = String(err);
+                if (errStr.includes("NotAllowedError") || errStr.includes("Permission denied")) {
+                    showToast("Izin kamera ditolak. Berikan izin di browser atau gunakan input manual.", "error");
+                } else if (errStr.includes("NotFoundError") || errStr.includes("OverconstrainedError")) {
+                    showToast("Kamera tidak ditemukan. Gunakan input barcode manual.", "error");
+                } else {
+                    showToast("Gagal mengakses kamera. Silakan gunakan input manual.", "error");
+                }
+            } finally {
+                isCameraTransitioning = false;
+            }
+        }
+
+        async function stopScanner() {
+            if (isCameraTransitioning || !html5QrCode || !isCameraRunning) return;
+            isCameraTransitioning = true;
+            
+            try {
+                await html5QrCode.stop();
+                isCameraRunning = false;
+                
+                const btnCameraToggle = document.getElementById('btnCameraToggle');
+                if (btnCameraToggle) {
+                    btnCameraToggle.innerText = "Mulai Kamera";
+                    btnCameraToggle.classList.replace('bg-rose-100', 'bg-green-100');
+                    btnCameraToggle.classList.replace('text-rose-600', 'text-green-600');
+                }
+            } catch (err) {
+                console.error("Error stopping scanner:", err);
+            } finally {
+                isCameraTransitioning = false;
+            }
+        }
+
+        async function toggleCamera() {
+            if (isCameraTransitioning) return;
+            
+            if (isCameraRunning) { 
+                await stopScanner(); 
+            } else { 
+                await initScanner(); 
+            }
+        }
+
+        let lastScanTime = 0;
+        let lastScanValue = "";
+
+        function processBarcode(decodedText, isBatch = false) {
+            let cleanText = decodedText.trim();
+
+            if (selectedMode !== 'VF' && cleanText.length > 11) {
+                cleanText = cleanText.slice(-11);
+            }
+
+            if (scannedBarcodesDB.has(cleanText)) {
+                if (!isBatch) {
+                    if (navigator.vibrate) navigator.vibrate([100, 100, 100]); 
+                    showToast(`Msisdn sudah ada`, 'error');
+                }
+                return false; 
+            }
+
+            const alreadyInCart = scannedData.some(item => item.barcode === cleanText);
+            if (alreadyInCart) {
+                if (!isBatch) {
+                    if (navigator.vibrate) navigator.vibrate([100, 100, 100]); 
+                    showToast(`Msisdn sudah ada`, 'error');
+                }
+                return false; 
+            }
+
+            if (!isBatch && navigator.vibrate) navigator.vibrate(200);
+
+            scannedData.unshift({
+                id: Date.now().toString() + Math.random().toString(36).substring(2, 5),
+                barcode: cleanText,
+                tipe: currentTab,
+                timestamp: new Date()
+            });
+
+            if (!isBatch) {
+                showToast(`Berhasil: ${cleanText}`, 'success');
+                renderScannedList();
+            }
+            return true; 
+        }
+
+        function onScanSuccess(decodedText, decodedResult) {
+            const now = Date.now();
+            if (decodedText === lastScanValue && (now - lastScanTime) < 3000) return; 
+
+            lastScanTime = now;
+            lastScanValue = decodedText; 
+
+            processBarcode(decodedText, false);
+        }
+
+        function onScanFailure(error) { /* Ignore */ }
+
+        function addManualBarcode() {
+            const startInput = document.getElementById('manualBarcodeInput');
+            const endInput = document.getElementById('manualBarcodeEndInput');
+            const rangeContainer = document.getElementById('rangeInputContainer');
+            
+            const startVal = startInput.value.trim();
+            const endVal = endInput.value.trim();
+            const isRange = !rangeContainer.classList.contains('hidden');
+
+            if (!startVal) {
+                showToast('Masukkan barcode terlebih dahulu!', 'error');
+                return;
+            }
+
+            if (isRange && endVal) {
+                if (isNaN(startVal) || isNaN(endVal)) {
+                    showToast('Range harus berupa angka!', 'error');
+                    return;
+                }
+
+                const startNum = BigInt(startVal);
+                const endNum = BigInt(endVal);
+                
+                if (startNum > endNum) {
+                    showToast('Nomor awal harus lebih kecil!', 'error');
+                    return;
+                }
+                
+                if (endNum - startNum > 100n) {
+                    showToast('Maksimal generate 100 barcode sekaligus!', 'error');
+                    return;
+                }
+
+                let successCount = 0;
+                let failCount = 0;
+                const originalLength = startVal.length; 
+
+                for (let i = startNum; i <= endNum; i++) {
+                    let currentStr = i.toString().padStart(originalLength, '0');
+                    const success = processBarcode(currentStr, true); 
+                    if (success) successCount++;
+                    else failCount++;
+                }
+
+                if (successCount > 0) {
+                    showToast(`Berhasil menambahkan ${successCount} barcode.` + (failCount > 0 ? ` (${failCount} dilewati)` : ''), 'success');
+                    startInput.value = '';
+                    endInput.value = '';
+                    renderScannedList();
+                    if (navigator.vibrate) navigator.vibrate(200);
+                } else {
+                    showToast(`Gagal menambahkan range (semua duplikat/sudah ada).`, 'error');
+                }
+
+            } else {
+                const success = processBarcode(startVal, false);
+                if (success) {
+                    startInput.value = ''; 
+                }
+            }
+        }
+
+        function handleManualInput(e) {
+            if (e.key === 'Enter') {
+                addManualBarcode();
+                document.getElementById('manualBarcodeInput').blur(); 
+                document.getElementById('manualBarcodeEndInput').blur();
+            }
+        }
+
+        // ================= RENDER CART/SCANNED ITEMS =================
+        function renderScannedList() {
+            const container = document.getElementById('scannedList');
+            const btnSubmit = document.getElementById('btnSubmitData');
+            
+            document.getElementById('scanCount').innerText = scannedData.length;
+
+            if (scannedData.length === 0) {
+                container.innerHTML = `
+                    <div id="emptyScanState" class="text-center py-10 mt-4">
+                        <div class="bg-white w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-dashed border-red-200 shadow-sm">
+                            <i data-lucide="ghost" class="w-10 h-10 text-red-300"></i>
+                        </div>
+                        <p class="text-sm font-bold text-gray-400">Keranjang scan masih kosong nih.</p>
+                    </div>
+                `;
+                btnSubmit.disabled = true;
+                lucide.createIcons();
+                return;
+            }
+
+            btnSubmit.disabled = false;
+            container.innerHTML = '';
+
+            scannedData.forEach(item => {
+                let badgeColor = item.tipe === 'Penjualan' ? 'bg-red-100 text-red-700' : 
+                                 item.tipe === 'Konsi' ? 'bg-orange-100 text-orange-700' : 
+                                 item.tipe === 'Stock Outlet' ? 'bg-blue-100 text-blue-700' : 'bg-gray-800 text-white';
+
+                const card = document.createElement('div');
+                card.className = "bg-white p-4 rounded-2xl border-2 border-gray-100 shadow-sm flex justify-between items-center fade-in hover:border-red-200 transition-colors";
+                const timeStr = item.timestamp.toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+
+                card.innerHTML = `
+                    <div class="flex-1 min-w-0 pr-3">
+                        <div class="flex items-center gap-2 mb-1.5">
+                            <span class="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-widest ${badgeColor}">${item.tipe}</span>
+                            <span class="text-[10px] font-medium text-gray-400"><i data-lucide="clock" class="inline w-3 h-3 mb-0.5"></i> ${timeStr}</span>
+                        </div>
+                        <p class="text-base font-mono font-bold text-gray-900 truncate">${item.barcode}</p>
+                    </div>
+                    <button onclick="removeScan('${item.id}')" class="p-2.5 bg-rose-50 text-red-500 hover:bg-red-500 hover:text-white rounded-xl transition-all shrink-0">
+                        <i data-lucide="trash-2" class="w-5 h-5"></i>
+                    </button>
+                `;
+                container.appendChild(card);
+            });
+            lucide.createIcons();
+        }
+
+        function removeScan(id) {
+            scannedData = scannedData.filter(item => item.id !== id);
+            renderScannedList();
+        }
+
+        // ================= RENDER HISTORY LOGIC (VIRTUAL PAGINATION) =================
+        function renderHistoryList() {
+            const container = document.getElementById('historyListContainer');
+            
+            // Filter HANYA berdasarkan tipe (karena dbHistoryData sudah difilter by salesName dari Server)
+            let filteredData = dbHistoryData.filter(row => {
+                const tipe = String(getV(row, 'tipetransaksi') || '').toLowerCase();
+                return tipe === currentHistoryTab.toLowerCase();
+            });
+
+            // Urutkan Terbaru
+            filteredData.sort((a,b) => {
+                let timeA = new Date(getV(a, 'timestamp') || getV(a, 'waktu') || getV(a, 'jam') || getV(a, 'waktuscanhp') || 0);
+                let timeB = new Date(getV(b, 'timestamp') || getV(b, 'waktu') || getV(b, 'jam') || getV(b, 'waktuscanhp') || 0);
+                return timeB - timeA;
+            });
+
+            if (!filteredData || filteredData.length === 0) {
+                container.innerHTML = `
+                    <div class="text-center py-10 mt-4 fade-in">
+                        <div class="bg-white w-24 h-24 rounded-full flex items-center justify-center mx-auto mb-4 border-2 border-dashed border-gray-200 shadow-sm">
+                            <i data-lucide="inbox" class="w-10 h-10 text-gray-300"></i>
+                        </div>
+                        <p class="text-sm font-bold text-gray-400">Belum ada riwayat ${currentHistoryTab}.</p>
+                    </div>
+                `;
+                lucide.createIcons();
+                return;
+            }
+
+            // SLICE: Batasi render awal (Lazy Load hanya sesuai layar)
+            const hasMoreData = filteredData.length > currentHistoryLimit;
+            const dataToRender = filteredData.slice(0, currentHistoryLimit);
+
+            const groupedHist = {};
+            
+            dataToRender.forEach(row => {
+                const outletName = String(getV(row, 'namaoutlet') || 'Outlet Tidak Diketahui').trim();
+                let rawTime = getV(row, 'timestamp') || getV(row, 'waktu') || getV(row, 'jam') || getV(row, 'waktuscanhp') || '';
+                
+                let dateKey = 'Tanggal Tidak Diketahui';
+                if(rawTime) {
+                    try {
+                        const d = new Date(rawTime);
+                        if(!isNaN(d)) dateKey = d.toLocaleDateString('id-ID', { year:'numeric', month:'short', day:'numeric' });
+                        else dateKey = String(rawTime).split(' ')[0];
+                    } catch(e){}
+                }
+
+                if (!groupedHist[dateKey]) groupedHist[dateKey] = {};
+                if (!groupedHist[dateKey][outletName]) groupedHist[dateKey][outletName] = [];
+                
+                groupedHist[dateKey][outletName].push(row);
+            });
+
+            container.innerHTML = ''; 
+
+            const sortedDates = Object.keys(groupedHist); 
+
+            sortedDates.forEach(dateStr => {
+                const dateBlock = document.createElement('div');
+                dateBlock.className = "mb-6 fade-in";
+                
+                let html = `
+                    <div class="flex items-center gap-2 mb-3">
+                        <div class="bg-red-500 w-1.5 h-4 rounded-full"></div>
+                        <h3 class="text-sm font-extrabold text-gray-900 tracking-wide uppercase">${dateStr}</h3>
+                    </div>
+                `;
+
+                const outletsObj = groupedHist[dateStr];
+                
+                for (const [outlet, items] of Object.entries(outletsObj)) {
+                    html += `
+                        <div class="bg-white border-2 border-gray-100 rounded-2xl overflow-hidden shadow-sm mb-4 history-card">
+                            <div class="bg-rose-50/50 px-3 py-2.5 border-b border-gray-100 flex items-center justify-between">
+                                <div class="flex items-center gap-2">
+                                    <i data-lucide="store" class="w-4 h-4 text-red-500"></i>
+                                    <h4 class="font-bold text-gray-800 text-xs truncate max-w-[200px]">${outlet}</h4>
+                                </div>
+                                <span class="text-[10px] bg-white border border-gray-200 px-2 py-0.5 rounded-md font-bold text-gray-500 shadow-sm">${items.length} Item (di Layar)</span>
+                            </div>
+                            
+                            <div class="p-3">
+                                <div class="grid grid-cols-2 gap-2">
+                    `;
+
+                    items.forEach(item => {
+                        let rawBarcode = getV(item, 'msisdn') || getV(item, 'itembarcode') || getV(item, 'barcode') || getV(item, 'sn') || '';
+                        let barcode = String(rawBarcode).replace(/^'/, '').trim();
+                        if (!barcode || barcode === 'undefined' || barcode === 'null') barcode = "-";
+
+                        html += `
+                                    <div class="flex flex-col bg-gray-50 p-2.5 rounded-xl border border-gray-100 items-center justify-center text-center">
+                                        <span class="text-xs font-mono font-extrabold text-gray-900">${barcode}</span>
+                                    </div>
+                        `;
+                    });
+
+                    html += `
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }
+
+                dateBlock.innerHTML = html;
+                container.appendChild(dateBlock);
+            });
+            lucide.createIcons();
+
+            // OBSERVER: Auto muat saat scroll sampai bawah
+            if (historyObserver) historyObserver.disconnect();
+
+            if (hasMoreData) {
+                const loadMoreTrigger = document.createElement('div');
+                loadMoreTrigger.className = "py-6 flex justify-center items-center w-full";
+                loadMoreTrigger.innerHTML = `<div class="loader w-6 h-6 border-[3px] border-gray-200 border-t-red-500"></div>`;
+                container.appendChild(loadMoreTrigger);
+
+                historyObserver = new IntersectionObserver((entries) => {
+                    if(entries[0].isIntersecting) {
+                        currentHistoryLimit += 20; // Tambah 20 data baru tiap kali mentok bawah
+                        renderHistoryList(); 
+                    }
+                }, { threshold: 0.1 });
+                
+                historyObserver.observe(loadMoreTrigger);
+            }
+        }
+
+        // ================= SUBMIT KE DATABASE =================
+        async function submitData() {
+            if (scannedData.length === 0) return;
+            if (SCRIPT_URL === "ISI_URL_GOOGLE_APPS_SCRIPT_ANDA_DISINI") {
+                alert("URL Google Apps Script belum diatur!");
+                return;
+            }
+
+            const btnSubmit = document.getElementById('btnSubmitData');
+            btnSubmit.disabled = true;
+
+            const payload = scannedData.map(item => ({
+                id_sales: selectedSales.id,
+                nama_sales: selectedSales.name,
+                id_outlet: selectedOutlet.id,
+                nama_outlet: selectedOutlet.name,
+                tipe_transaksi: item.tipe,
+                item_barcode: item.barcode, 
+                timestamp: item.timestamp.toISOString() 
+            }));
+
+            await stopScanner();
+            
+            const overlay = document.getElementById('loadingOverlay');
+            document.getElementById('loadingText').innerText = "Menyimpan ke Database...";
+            overlay.classList.remove('hidden');
+            overlay.classList.add('flex');
+
+            try {
+                const response = await fetchWithTimeout(SCRIPT_URL, {
+                    method: 'POST',
+                    body: JSON.stringify(payload),
+                    headers: { 'Content-Type': 'text/plain;charset=utf-8' }
+                }, 25000);
+
+                const result = await response.json();
+
+                if (result.status === 'success') {
+                    showToast("Data berhasil disimpan!", "success");
+                    
+                    payload.forEach(p => {
+                        scannedBarcodesDB.add(p.item_barcode);
+                        dbHistoryData.push({
+                            namasales: p.nama_sales,
+                            namaoutlet: p.nama_outlet,
+                            tipetransaksi: p.tipe_transaksi,
+                            msisdn: p.item_barcode,
+                            timestamp: p.timestamp
+                        });
+                    });
+
+                    scannedData = [];
+                    renderScannedList();
+                    await initScanner();
+                } else {
+                    throw new Error(result.message || "Gagal menyimpan");
+                }
+            } catch (error) {
+                showToast("Terjadi kesalahan jaringan/server.", "error");
+                console.error(error);
+                btnSubmit.disabled = false;
+            } finally {
+                overlay.classList.add('hidden');
+                overlay.classList.remove('flex');
+            }
+        }
+
+        // ================= TOAST NOTIFICATION (ALERTS) =================
+        function showToast(message, type = 'info') {
+            const toast = document.getElementById('toastMsg');
+            const text = document.getElementById('toastText');
+            const icon = document.getElementById('toastIcon');
+
+            text.innerText = message;
+            
+            if (type === 'error') {
+                toast.classList.replace('bg-gray-800', 'bg-red-600');
+                icon.setAttribute('data-lucide', 'alert-triangle');
+            } else if (type === 'success') {
+                toast.classList.replace('bg-gray-800', 'bg-green-600');
+                icon.setAttribute('data-lucide', 'check-circle');
+            } else {
+                toast.classList.replace('bg-red-600', 'bg-gray-800');
+                toast.classList.replace('bg-green-600', 'bg-gray-800');
+                icon.setAttribute('data-lucide', 'info');
+            }
+            lucide.createIcons();
+
+            toast.classList.remove('opacity-0', 'pointer-events-none');
+            setTimeout(() => { toast.classList.add('opacity-0', 'pointer-events-none'); }, 4000);
+        }
+
+    </script>
+</body>
+</html>
