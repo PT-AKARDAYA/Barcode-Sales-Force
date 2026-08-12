@@ -59,6 +59,10 @@
             </div>
             
             <div class="flex items-center gap-2">
+                <div id="bgSyncBadge" class="hidden bg-white/20 px-2.5 py-1 rounded-full text-[10px] font-extrabold text-white flex items-center gap-1.5 backdrop-blur-sm animate-pulse shrink-0">
+                    <i data-lucide="refresh-cw" class="w-3 h-3 animate-spin"></i>
+                    <span>Sinkronisasi...</span>
+                </div>
                 <button id="btnHistory" onclick="openHistory()" class="bg-white/20 p-2 rounded-full backdrop-blur-sm hover:bg-white/30 transition">
                     <i data-lucide="history" class="w-5 h-5"></i>
                 </button>
@@ -353,69 +357,88 @@
         async function fetchInitialData() {
             const overlay = document.getElementById('loadingOverlay');
             const loadingText = document.getElementById('loadingText');
+            const bgSyncBadge = document.getElementById('bgSyncBadge');
             
-            // 1. Coba muat cache terlebih dahulu agar aplikasi bisa tampil LANGSUNG (0ms delay)
+            // 1. DAHULUKAN CACHE AGAR SALES TAMPIL & APLIKASI TERBUKA SEGERA (0ms)
             const hasCached = loadCachedOutletData();
             if (hasCached) {
                 checkAutoLogin();
+                overlay.classList.add('hidden');
+                overlay.classList.remove('flex');
             } else {
-                loadingText.innerText = "Memeriksa data...";
+                loadingText.innerText = "Memuat data Sales...";
                 overlay.classList.remove('hidden');
                 overlay.classList.add('flex');
             }
 
+            // Tampilkan indikator sinkronisasi di navbar
+            if (bgSyncBadge) {
+                bgSyncBadge.classList.remove('hidden');
+                lucide.createIcons();
+            }
+
             try {
-                // 2. Tarik Data Outlet dan Barcode secara PARALEL (simultan) agar 2x lebih cepat
-                const outletPromise = fetchWithTimeout(SCRIPT_URL + "?action=getOutlet", {}, 25000)
-                    .then(r => r.json())
-                    .then(res => {
-                        if (res.status === 'success' && Array.isArray(res.data)) {
-                            processOutletData(res.data);
-                            try {
-                                localStorage.setItem('cachedOutletData', JSON.stringify(res.data));
-                            } catch (e) {}
+                // 2. TAHAP 1 LATAR BELAKANG: Tarik Data Sales & Outlet dari Server
+                const resOutlet = await fetchWithTimeout(SCRIPT_URL + "?action=getOutlet", {}, 25000);
+                const resultOutlet = await resOutlet.json();
+                
+                if (resultOutlet.status === 'success' && Array.isArray(resultOutlet.data)) {
+                    processOutletData(resultOutlet.data);
+                    try {
+                        localStorage.setItem('cachedOutletData', JSON.stringify(resultOutlet.data));
+                    } catch (e) {}
+
+                    // Segera buka aplikasi & update tampilan Sales jika belum auto-login
+                    if (!selectedSales) {
+                        checkAutoLogin();
+                    } else {
+                        const freshSales = dataMaster.find(s => s.id === selectedSales.id);
+                        if (freshSales) {
+                            selectedSales = freshSales;
+                            renderOutletList(freshSales.outlets);
                         }
-                    })
-                    .catch(e => console.warn("Gagal tarik outlet:", e));
-
-                const barcodePromise = fetchWithTimeout(SCRIPT_URL + "?action=getBarcodes", {}, 15000)
-                    .then(r => r.json())
-                    .then(res => {
-                        if (res.status === 'success' && Array.isArray(res.data)) {
-                            scannedBarcodesDB.clear();
-                            res.data.forEach(b => {
-                                let cleanBarcode = String(b).replace(/^'/, '').trim();
-                                if(cleanBarcode) {
-                                    scannedBarcodesDB.add(cleanBarcode);
-                                    if (cleanBarcode.length > 11) {
-                                        scannedBarcodesDB.add(cleanBarcode.slice(-11));
-                                    }
-                                }
-                            });
-                        }
-                    })
-                    .catch(e => console.warn("Gagal tarik barcodes:", e));
-
-                // Tunggu data outlet selesai (barcode berjalan di background)
-                await outletPromise;
-
-                // Update tampilan dengan data segar dari server jika belum auto-login
-                if (!selectedSales) {
-                    checkAutoLogin();
+                    }
                 }
-
-                // Selesaikan barcode
-                await barcodePromise;
-
-            } catch (error) {
-                console.error("Fetch initial data error:", error);
+            } catch (errOutlet) {
+                console.warn("Gagal sinkronisasi data outlet di latar belakang:", errOutlet);
                 if (!hasCached) {
                     loadCachedOutletData();
                     checkAutoLogin();
                 }
             } finally {
+                // Selesaikan overlay loading - APLIKASI PASTI TERBUKA SEGERA
                 overlay.classList.add('hidden');
                 overlay.classList.remove('flex');
+            }
+
+            // 3. TAHAP 2 LATAR BELAKANG: Tarik Daftar Barcode Global & Histori di Latar Belakang
+            try {
+                const resBarcodes = await fetchWithTimeout(SCRIPT_URL + "?action=getBarcodes", {}, 15000);
+                const resultBarcodes = await resBarcodes.json();
+                if (resultBarcodes.status === 'success' && Array.isArray(resultBarcodes.data)) {
+                    scannedBarcodesDB.clear();
+                    resultBarcodes.data.forEach(b => {
+                        let cleanBarcode = String(b).replace(/^'/, '').trim();
+                        if(cleanBarcode) {
+                            scannedBarcodesDB.add(cleanBarcode);
+                            if (cleanBarcode.length > 11) {
+                                scannedBarcodesDB.add(cleanBarcode.slice(-11));
+                            }
+                        }
+                    });
+                }
+            } catch (e) {
+                console.warn("Gagal sinkronisasi barcode global di latar belakang:", e);
+            }
+
+            // Jika Sales aktif sudah login/terpilih, tarik histori terbarunya di latar belakang
+            if (selectedSales) {
+                fetchHistoryForSales(selectedSales.name, false);
+            }
+
+            // Selesai seluruh proses latar belakang, sembunyikan badge sinkronisasi
+            if (bgSyncBadge) {
+                bgSyncBadge.classList.add('hidden');
             }
         }
 
