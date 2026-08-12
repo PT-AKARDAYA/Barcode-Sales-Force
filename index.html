@@ -646,7 +646,20 @@
         function confirmOutletMode(mode) {
             selectedMode = mode;
             const outletToSelect = pendingOutlet;
-            closeOutletModal();
+            pendingOutlet = null;
+
+            // Sembunyikan modal
+            const modal = document.getElementById('modalMode');
+            if (modal) {
+                modal.classList.add('hidden');
+                modal.classList.remove('flex');
+            }
+
+            // Ganti history state dari #modal ke #scanner agar tidak terjadi race condition history.back()
+            if (history.state && history.state.modal === 'mode') {
+                history.replaceState({ view: 'scanner' }, '', '#scanner');
+            }
+
             if (outletToSelect) {
                 selectOutlet(outletToSelect);
             }
